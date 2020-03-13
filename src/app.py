@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import yaml
 import datetime
 
@@ -35,36 +36,51 @@ countries=[{'label':c, 'value': c} for c in epidemie_df['Country/Region'].unique
 app = dash.Dash('Corona Virus Explorer')
 app.layout = html.Div([
     html.H1(['Corona Virus Explorer'], style={'textAlign': 'center'}),
-    html.Div([
-        dcc.Dropdown(
-            id='country',
-            options=countries
-        )
-       
+    dcc.Tabs([
+        dcc.Tab(label='Time', children=[
+            html.Div([
+                dcc.Dropdown(
+                    id='country',
+                    options=countries
+                )
+            ]),
+            html.Div([
+                dcc.Dropdown(
+                    id='country2',
+                    options=countries
+                )
+
+            ]),
+            html.Div([
+                dcc.RadioItems(
+                    id='variable',
+                    options=[
+                        {'label':'Confirmed', 'value': 'Confirmed'},
+                        {'label':'Deaths', 'value': 'Deaths'},
+                        {'label':'Recovered', 'value': 'Recovered'}
+                    ],
+                    value='Confirmed',
+                    labelStyle={'display': 'inline-block'}
+                )
+            ]),
+            html.Div([
+                dcc.Graph(id='graph1')
+            ])
+        ]),
+        dcc.Tab(label='Map', children=[
+            html.H6(['The map:']),
+            dcc.Graph(id='map1'),
+            dcc.Slider(
+                id='map_day',
+                min=0,
+                max=(epidemie_df['day'].max() - epidemie_df['day'].min()).days,
+                value=0,
+                marks={i:str(i) for i, date in enumerate(epidemie_df['day'].unique())}
+            )     
+        ]),
     ]),
-    html.Div([
-        dcc.Dropdown(
-            id='country2',
-            options=countries
-        )
-       
-    ]),
-    html.Div([
-        dcc.RadioItems(
-            id='variable',
-            options=[
-                {'label':'Confirmed', 'value': 'Confirmed'},
-                {'label':'Deaths', 'value': 'Deaths'},
-                {'label':'Recovered', 'value': 'Recovered'}
-            ],
-            value='Confirmed',
-            labelStyle={'display': 'inline-block'}
-        )
-    ]),
-    html.Div([
-        dcc.Graph(id='graph1')
-    ])
 ])
+
 @app.callback(
     Output('graph1', 'figure'),
     [
@@ -107,6 +123,40 @@ def update_graph(country, country2, variable):
             )
         ] if country2 is not None else [])
     }
-    
+
+@app.callback(
+    Output('map1', 'figure'),
+    [
+        Input('map_day','value'),
+    ]
+)
+def update_map(map_day):
+    day= epidemie_df['day'].unique()[map_day]
+    map_df = (epidemie_df[epidemie_df['day'] == day]
+              .groupby(['Country/Region'])
+              .agg({'Confirmed':'sum', 'Latitude': 'mean', 'Longitude': 'mean'})
+              .reset_index()
+             )
+
+    return {
+        'data':[
+            dict(
+                type='scattergeo',
+                lon=map_df['Longitude'],
+                lat=map_df['Latitude'],
+                text=map_df.apply(lambda r: r['Country/Region'] + '(' + str(r['Confirmed']) + ')', axis=1),
+                mode='markers',
+                marker=dict(
+                    size=np.maximum(map_df['Confirmed']/ 1_000, 10)
+                )
+            )
+        ],
+        'layout': dict(
+            title=str(day),
+            geo=dict(showland=True)
+        )
+       
+    }
+              
 if __name__ == '__main__':
     app.run_server(debug=True)
