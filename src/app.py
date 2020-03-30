@@ -8,7 +8,9 @@ import pandas as pd
 import dash 
 import dash_core_components as dcc
 import dash_html_components as html
+
 from dash.dependencies import Input, Output
+from scipy.integrate import solve_ivp
 
 #Répertoire de sauvegarde des fichiers bruts
 PROCESSED_DIR = '../data/processed/'
@@ -78,6 +80,25 @@ app.layout = html.Div([
                 marks={i:str(i) for i, date in enumerate(epidemie_df['day'].unique())}
             )     
         ]),
+        dcc.Tab(label='Modelisation', children=[
+            
+            html.Div([
+                dcc.Dropdown(
+                    id='country3',
+                    options=countries
+                ),
+                dcc.Input(
+                    id= 'beta_i',placeholder='beta', type='number'),
+                dcc.Input(
+                    id='gamma_i',placeholder='gamma', type='number') ,
+                dcc.Input(
+                    id='pop_i',placeholder='population', type='number') ,
+                
+                #html.Hr(pppp),
+                html.Div(id="number-out"),
+                dcc.Graph(id='graph2'),
+            ]),
+        ]),
     ]),
 ])
 
@@ -87,6 +108,7 @@ app.layout = html.Div([
         Input('country','value'),
         Input('country2','value'),
         Input('variable','value'),
+        
     ]
 )
 def update_graph(country, country2, variable):
@@ -131,7 +153,7 @@ def update_graph(country, country2, variable):
     ]
 )
 def update_map(map_day):
-    day= epidemie_df['day'].unique()[map_day]
+    day= epidemie_df['day'].sort_values(ascending=True).unique()[map_day]
     map_df = (epidemie_df[epidemie_df['day'] == day]
               .groupby(['Country/Region'])
               .agg({'Confirmed':'sum', 'Latitude': 'mean', 'Longitude': 'mean'})
@@ -157,6 +179,120 @@ def update_map(map_day):
         )
        
     }
-              
+
+#def get_country(self, country):
+#    return (epidemie_df[epidemie_df['Country/Region']==country]
+#           .groupby(['Country/Region', 'day'])
+#           .agg({'Confirmed': 'sum', 'Deaths':'sum','Recovered':'sum'})
+#           .reset_index()
+#           )
+
+#Monkey Patch pd.Dataframe
+#pd.DataFrame.get_country = get_country  
+
+beta_opt,gamma_opt = [0.01,0.1]
+def SIR(t,y):
+    S = y[0]
+    I = y[1]
+    R = y[2]
+    return([-beta*S*I, beta*S*I-gamma*I, gamma*I])
+
+
+
+def get_country(self, country3):
+    return (epidemie_df[epidemie_df['Country/Region'] == country3]
+            .groupby(['Country/Region', 'day'])
+            .agg({'Confirmed': 'sum', 'Deaths': 'sum', 'Recovered': 'sum'})
+            .reset_index()
+           )
+pd.DataFrame.get_country = get_country
+
+
+@app.callback(
+    Output('graph2', 'figure'),
+    [
+        Input('beta_i', 'value'),
+        Input('gamma_i','value'),
+        Input('pop_i', 'value'),
+        Input('country3','value'),
+
+       
+    ]
+)
+
+def plot_epidemia(solution, infected, beta_i, gamma_i, country3):
+    print(country3)
+    
+
+    #pop_i=pop
+    
+    if beta_i is None:
+        beta=beta_opt
+    else:
+        beta=beta_i
+        
+        
+    if gamma_i is not None:
+        gamma=gamma_opt
+    else: 
+        gamma=gamma_i
+        
+        
+    if country3 is None:
+        country_df=(epidemie_df
+           .groupby( 'day')
+           .agg({'Confirmed': 'sum', 'Deaths':'sum','Recovered':'sum'})
+           .reset_index()
+           )
+        country_df['infected'] = country_df['Confirmed'].diff()
+        infected=country_df.loc[2:].head()
+        solution = solve_ivp(SIR,[0,40],[51_470_000,1,0],t_eval=np.arange(0,40,1))
+        
+    else: 
+        country_df= (epidemie_df[epidemie_df['Country/Region']==country3]
+           .groupby(['Country/Region', 'day'])
+           .agg({'Confirmed': 'sum', 'Deaths':'sum','Recovered':'sum'})
+           .reset_index()
+           )
+        country_df['infected'] = country_df['Confirmed'].diff()
+        infected=country_df.loc[2:].head()
+        solution = solve_ivp(SIR,[0,40],[51_470_000,1,0],t_eval=np.arange(0,40,1))
+    
+    return{
+        'data':[
+            dict(
+                x=solution.t,
+                y=solution.y[0],
+                type='line',
+                name='Susceptible'
+            )
+        ] + ([
+            dict(
+                x=solution.t,
+                y=solution.y[1],
+                type='line',
+                name='infected'
+            )
+        ]) + ([
+            dict(
+                x=solution.t,
+                y=solution.y[2],
+                type='line',
+                name='Removed'
+            )
+        ]) + ([
+            dict(
+                x=infected.reset_index(drop=True).index,
+                y=infected,
+                type='line',
+                name='original'
+            )
+        ])
+            }   
+
+
+
+
+        
 if __name__ == '__main__':
     app.run_server(debug=True)
